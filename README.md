@@ -1,5 +1,17 @@
 # Raspberry Pi Pico 7 segment timer
 
+## Setup
+
+```bash
+rustup self update
+rustup update stable
+rustup target add thumbv6m-none-eabi
+cargo install elf2uf2-rs --locked
+cargo install flip-link
+```
+
+## Run
+
 ```bash
 cargo run --release
 ```
