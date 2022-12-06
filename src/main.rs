@@ -4,12 +4,12 @@
 mod segment_display;
 
 use bsp::entry;
-use core::cell::RefCell;
+use core::{cell::RefCell, ops::DerefMut};
 use critical_section::Mutex;
 use defmt_rtt as _;
 use fugit::MicrosDurationU32;
 use panic_probe as _;
-use rp2040_hal as rhal;
+use rp2040_hal as hal;
 use rp_pico as bsp;
 
 use bsp::hal::{
@@ -18,16 +18,13 @@ use bsp::hal::{
     sio::Sio,
     watchdog::Watchdog,
 };
-use rhal::{
-    pac::interrupt,
-    timer::{Alarm, Alarm0},
-};
+use hal::{pac::interrupt, timer::Alarm};
 use segment_display::*;
 
-type InterruptData = (u32, Alarm0);
-
-const SCAN_TIME: MicrosDurationU32 = MicrosDurationU32::secs(1);
-static COUNTER: Mutex<RefCell<Option<InterruptData>>> = Mutex::new(RefCell::new(None));
+const SCAN_TIME: MicrosDurationU32 = MicrosDurationU32::secs(1_000_000);
+static COUNTER: Mutex<RefCell<Option<i32>>> = Mutex::new(RefCell::new(None));
+static ALARM: Mutex<RefCell<Option<bsp::hal::timer::Alarm0>>> = Mutex::new(RefCell::new(None));
+static TIMER: Mutex<RefCell<Option<bsp::hal::timer::Timer>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
@@ -61,11 +58,15 @@ fn main() -> ! {
 
     let mut timer = bsp::hal::Timer::new(pac.TIMER, &mut pac.RESETS);
 
+    let mut alarm = timer.alarm_0().unwrap();
+    alarm.schedule(SCAN_TIME).unwrap();
+    alarm.enable_interrupt();
+
     critical_section::with(|cs| {
-        let mut alarm = timer.alarm_0().unwrap();
-        let _ = alarm.schedule(SCAN_TIME);
-        alarm.enable_interrupt();
-        COUNTER.borrow(cs).replace(Some((0, alarm)));
+        // cortex_m::interrupt::free(|cs| {
+        COUNTER.borrow(cs).replace(Some(999));
+        TIMER.borrow(cs).replace(Some(timer));
+        ALARM.borrow(cs).replace(Some(alarm));
     });
 
     unsafe {
@@ -96,22 +97,23 @@ fn main() -> ! {
     loop {
         // cortex_m::asm::wfi();
         critical_section::with(|cs| {
-            display.num_display(COUNTER.borrow(cs).take().unwrap().0 as i32, &mut delay);
+            display.num_display(COUNTER.borrow(cs).take().unwrap(), &mut delay);
         });
     }
 }
 
+#[allow(non_snake_case)]
 #[interrupt]
 fn TIMER_IRQ_0() {
     critical_section::with(|cs| {
-        let count_alarm = COUNTER.borrow(cs).take();
-        if let Some((mut count, mut alarm)) = count_alarm {
+        if let Some(ref mut alarm) = ALARM.borrow(cs).borrow_mut().deref_mut() {
+            alarm.schedule(SCAN_TIME).unwrap();
             alarm.clear_interrupt();
-            let _ = alarm.schedule(SCAN_TIME);
-            count += 1;
-            COUNTER
-                .borrow(cs)
-                .replace_with(|_| Some((count, alarm)));
+        }
+
+        if let Some(ref mut counter) = COUNTER.borrow(cs).borrow_mut().deref_mut() {
+            let update = *counter + 1;
+            COUNTER.borrow(cs).replace_with(|_| Some(update));
         }
     });
 }

@@ -72,6 +72,7 @@ where
     I7: PinId,
     I8: PinId,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         a: Pin<I1, Output<PushPull>>,
         b: Pin<I2, Output<PushPull>>,
@@ -253,7 +254,7 @@ where
     }
 
     pub fn num_display(&mut self, number: i32, delay: &mut Delay) {
-        if number > 9999 || number < -999 {
+        if !(-999..=9999).contains(&number) {
             // Out of range
             todo!();
         } else if number.is_negative() {
